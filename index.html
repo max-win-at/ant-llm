@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ant Colony Simulation</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <header>
+    <h1>Ant Colony Simulation</h1>
+    <p class="subtitle">
+      Stigmergic Web-Agent Architecture &mdash; Bio-inspired browser simulation
+    </p>
+  </header>
+
+  <main>
+    <div class="canvas-wrapper">
+      <canvas id="simulation"></canvas>
+    </div>
+
+    <div class="controls">
+      <button id="btn-pause">Pause</button>
+      <button id="btn-reset">Reset Colony</button>
+      <span id="status" class="status">Loading...</span>
+    </div>
+
+    <section class="info">
+      <h2>How it works</h2>
+      <ul>
+        <li><strong>Ants</strong> are persistent agents stored in <code>LocalStorage</code>.</li>
+        <li><strong>Pheromone trails</strong> are maintained in <code>IndexedDB</code>.</li>
+        <li><strong>Food</strong> is fetched from public APIs and stored as browser <code>Cookies</code> (with natural expiry).</li>
+        <li><strong>Dangers</strong> come from HTTP error codes (429, 500) simulated via <code>httpstat.us</code>.</li>
+        <li>The colony <strong>reproduces</strong> when enough food is gathered, and ants <strong>die</strong> from energy loss or predators.</li>
+      </ul>
+      <h2>Legend</h2>
+      <ul class="legend">
+        <li><span class="dot dot-worker"></span> Worker ant</li>
+        <li><span class="dot dot-scout"></span> Scout ant</li>
+        <li><span class="dot dot-returning"></span> Returning with food</li>
+        <li><span class="dot dot-food"></span> Food source (API)</li>
+        <li><span class="dot dot-danger"></span> Danger zone</li>
+        <li><span class="dot dot-nest"></span> Nest</li>
+      </ul>
+    </section>
+  </main>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
