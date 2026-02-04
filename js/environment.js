@@ -99,9 +99,14 @@ export class NetworkTopology {
    */
   async forage(source) {
     const randomId = Math.floor(Math.random() * 20) + 1;
-    const url = source.url.endsWith('/')
+    const rawUrl = source.url.endsWith('/')
       ? source.url + randomId
       : source.url;
+
+    // Route through CORS proxy to avoid cross-origin blocks
+    const url = CONFIG.CORS_PROXY_PREFIX
+      ? CONFIG.CORS_PROXY_PREFIX + encodeURIComponent(rawUrl)
+      : rawUrl;
 
     const startTime = performance.now();
 
@@ -118,7 +123,7 @@ export class NetworkTopology {
           status: 429,
           rtt,
           danger: 'predator',
-          url,
+          url: rawUrl,
         };
       }
 
@@ -129,7 +134,7 @@ export class NetworkTopology {
           status: response.status,
           rtt,
           danger: 'storm',
-          url,
+          url: rawUrl,
         };
       }
 
@@ -140,7 +145,7 @@ export class NetworkTopology {
           status: response.status,
           rtt,
           danger: 'camouflage',
-          url,
+          url: rawUrl,
         };
       }
 
@@ -160,7 +165,7 @@ export class NetworkTopology {
         title: String(title).slice(0, 80),
         payload,
         foodType,
-        url,
+        url: rawUrl,
       };
     } catch (err) {
       // Timeout / network error: Swamp terrain
@@ -171,7 +176,7 @@ export class NetworkTopology {
         rtt,
         danger: 'timeout',
         message: err.message,
-        url,
+        url: rawUrl,
       };
     }
   }
