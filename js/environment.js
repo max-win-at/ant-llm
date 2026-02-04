@@ -292,7 +292,7 @@ export class NetworkTopology {
           status: response.status,
           rtt,
           danger: 'storm',
-          url,
+          url: rawUrl,
         };
       }
       if (!response.ok) {
@@ -301,7 +301,7 @@ export class NetworkTopology {
           status: response.status,
           rtt,
           danger: 'camouflage',
-          url,
+          url: rawUrl,
         };
       }
 
@@ -315,7 +315,7 @@ export class NetworkTopology {
         rtt,
         danger: 'timeout',
         message: err.message,
-        url,
+        url: rawUrl,
       };
     }
   }
