@@ -3,8 +3,10 @@ import { Colony } from './colony.js';
 import { Renderer } from './renderer.js';
 
 /**
- * Application entry point.
- * Initialises the colony, starts the simulation loop and the render loop.
+ * Application entry point for the stigmergic network topology simulation.
+ *
+ * Initialises the colony, starts the simulation loop (network-paced)
+ * and the render loop (force-directed graph visualization).
  */
 async function main() {
   const canvas = document.getElementById('simulation');
@@ -28,7 +30,7 @@ async function main() {
   await colony.init();
   setStatus(`Colony ready — ${colony.aliveCount} ants`);
 
-  // ─── Simulation loop ──────────────────────────────────────
+  // ─── Simulation loop (network-paced) ───────────────────────
 
   let running = true;
 
@@ -42,7 +44,7 @@ async function main() {
     setTimeout(simLoop, CONFIG.TICK_INTERVAL_MS);
   }
 
-  // ─── Render loop ──────────────────────────────────────────
+  // ─── Render loop (requestAnimationFrame) ───────────────────
 
   function renderLoop() {
     if (!running) return;
@@ -75,7 +77,7 @@ async function main() {
     });
   }
 
-  // ─── Start ────────────────────────────────────────────────
+  // ─── Start ─────────────────────────────────────────────────
 
   simLoop();
   renderLoop();
