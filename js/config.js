@@ -41,24 +41,28 @@ export const CONFIG = {
     {
       name: 'JSONPlaceholder Posts',
       url: 'https://jsonplaceholder.typicode.com/posts/',
+      fallbackUrl: 'data/posts.json',
       type: 'sugar',
       nutritionMultiplier: 1.0,
     },
     {
       name: 'JSONPlaceholder Todos',
       url: 'https://jsonplaceholder.typicode.com/todos/',
+      fallbackUrl: 'data/todos.json',
       type: 'sugar',
       nutritionMultiplier: 0.8,
     },
     {
       name: 'PokeAPI',
       url: 'https://pokeapi.co/api/v2/pokemon/',
+      fallbackUrl: 'data/pokemon.json',
       type: 'protein',
       nutritionMultiplier: 2.0,
     },
     {
       name: 'REST Countries',
       url: 'https://restcountries.com/v3.1/all',
+      fallbackUrl: 'data/countries.json',
       type: 'protein',
       nutritionMultiplier: 1.5,
     },
