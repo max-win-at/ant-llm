@@ -103,11 +103,15 @@ async function main() {
 
   // Handle mode changes from settings panel
   settingsPanel.onModeChangeCallback = (mode, providerId) => {
-    if (mode === 'llm' && llmManager.hasActiveProvider()) {
-      colony.setLLMManager(llmManager);
-      const providerName = llmManager.getActiveProvider().getName();
-      setStatus(`LLM Mode activated: ${providerName}`);
-      console.log('LLM mode activated with provider:', providerName);
+    if (mode === 'llm') {
+      if (llmManager.hasActiveProvider()) {
+        colony.setLLMManager(llmManager);
+        const providerName = llmManager.getActiveProvider().getName();
+        setStatus(`LLM Mode activated: ${providerName}`);
+        console.log('LLM mode activated with provider:', providerName);
+      } else {
+        console.log('LLM mode selected but no provider configured yet');
+      }
     } else {
       colony.llmMode = false;
       setStatus('Traditional mode activated');
