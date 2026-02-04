@@ -1,6 +1,8 @@
 import { CONFIG } from './config.js';
 import { Colony } from './colony.js';
 import { Renderer } from './renderer.js';
+import { LLMManager } from './llm/llm-manager.js';
+import { SettingsPanel } from './ui/settings-panel.js';
 
 /**
  * Application entry point for the stigmergic network topology simulation.
@@ -17,9 +19,12 @@ async function main() {
 
   const colony = new Colony();
   const renderer = new Renderer(canvas);
+  const llmManager = new LLMManager();
+  const settingsPanel = new SettingsPanel(llmManager);
 
-  // Expose colony to console for debugging
+  // Expose to console for debugging
   window.__colony = colony;
+  window.__llmManager = llmManager;
 
   const statusEl = document.getElementById('status');
   const setStatus = (msg) => {
@@ -28,7 +33,16 @@ async function main() {
 
   setStatus('Initialising colony...');
   await colony.init();
-  setStatus(`Colony ready — ${colony.aliveCount} ants`);
+
+  // Try to restore last LLM provider
+  const restored = await llmManager.restoreLastProvider();
+  if (restored) {
+    colony.setLLMManager(llmManager);
+    console.log('LLM provider restored:', llmManager.getActiveProvider().getName());
+    setStatus(`Colony ready — ${colony.aliveCount} ants (LLM Mode: ${llmManager.getActiveProvider().getName()})`);
+  } else {
+    setStatus(`Colony ready — ${colony.aliveCount} ants (Traditional Mode)`);
+  }
 
   // ─── Simulation loop (network-paced) ───────────────────────
 
@@ -72,10 +86,34 @@ async function main() {
     resetBtn.addEventListener('click', () => {
       colony.reset();
       colony.init().then(() => {
-        setStatus(`Colony reset — ${colony.aliveCount} ants`);
+        const mode = colony.isLLMEnabled()
+          ? `LLM Mode: ${llmManager.getActiveProvider().getName()}`
+          : 'Traditional Mode';
+        setStatus(`Colony reset — ${colony.aliveCount} ants (${mode})`);
       });
     });
   }
+
+  const settingsBtn = document.getElementById('btn-settings');
+  if (settingsBtn) {
+    settingsBtn.addEventListener('click', () => {
+      settingsPanel.open();
+    });
+  }
+
+  // Handle mode changes from settings panel
+  settingsPanel.onModeChangeCallback = (mode, providerId) => {
+    if (mode === 'llm' && llmManager.hasActiveProvider()) {
+      colony.setLLMManager(llmManager);
+      const providerName = llmManager.getActiveProvider().getName();
+      setStatus(`LLM Mode activated: ${providerName}`);
+      console.log('LLM mode activated with provider:', providerName);
+    } else {
+      colony.llmMode = false;
+      setStatus('Traditional mode activated');
+      console.log('Traditional mode activated');
+    }
+  };
 
   // ─── Start ─────────────────────────────────────────────────
 

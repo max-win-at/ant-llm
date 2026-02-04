@@ -3,6 +3,7 @@ import { Ant } from './ant.js';
 import { PheromoneRegistry } from './pheromone.js';
 import { CookieManager } from './cookie-manager.js';
 import { NetworkTopology } from './environment.js';
+import { LLMOrchestrator } from './llm/llm-orchestrator.js';
 
 /**
  * Colony orchestrator for the stigmergic network topology simulation.
@@ -34,6 +35,24 @@ export class Colony {
     };
     /** @type {Array<{url: string, rtt: number, success: boolean, timestamp: number, antId: string, status: number}>} */
     this.activityLog = [];
+    this.llmOrchestrator = null;
+    this.llmMode = false; // Flag to enable LLM decision-making
+  }
+
+  /**
+   * Set the LLM manager and enable LLM-based decision making
+   * @param {LLMManager} llmManager - Initialized LLM manager
+   */
+  setLLMManager(llmManager) {
+    this.llmOrchestrator = new LLMOrchestrator(llmManager, this);
+    this.llmMode = llmManager.hasActiveProvider();
+  }
+
+  /**
+   * Check if LLM mode is enabled and ready
+   */
+  isLLMEnabled() {
+    return this.llmMode && this.llmOrchestrator !== null;
   }
 
   /**
@@ -159,7 +178,30 @@ export class Colony {
     const slotsAvailable = CONFIG.MAX_CONCURRENT_FETCHES - this.activeFetches;
     const toDispatch = idleAnts.slice(0, Math.max(0, slotsAvailable));
 
-    const fetchPromises = toDispatch.map((ant) => this._dispatchAnt(ant));
+    let fetchPromises = [];
+
+    if (this.isLLMEnabled() && toDispatch.length > 0) {
+      // LLM mode: get decisions for all ants in one call
+      try {
+        const decisions = await this.llmOrchestrator.getDecisions(toDispatch);
+        fetchPromises = toDispatch.map((ant) => {
+          const decision = decisions.get(ant.id);
+          if (decision) {
+            return this._dispatchAntWithTarget(ant, decision.targetUrl);
+          } else {
+            // Fallback to traditional selection if LLM didn't provide a decision
+            return this._dispatchAnt(ant);
+          }
+        });
+      } catch (error) {
+        console.warn('LLM decision-making failed, falling back to traditional method:', error);
+        // Fallback to traditional method
+        fetchPromises = toDispatch.map((ant) => this._dispatchAnt(ant));
+      }
+    } else {
+      // Traditional mode: individual ant selection
+      fetchPromises = toDispatch.map((ant) => this._dispatchAnt(ant));
+    }
 
     // 3. Process returning ants — deliver food at nest
     for (const ant of this.ants) {
@@ -203,6 +245,21 @@ export class Colony {
   async _dispatchAnt(ant) {
     const target = this._selectTarget(ant);
     if (!target) return;
+    return this._dispatchAntWithTarget(ant, target.url);
+  }
+
+  /**
+   * Dispatch an ant to a specific target URL (used by LLM mode)
+   * @param {Ant} ant - The ant to dispatch
+   * @param {string} targetUrl - The target URL
+   */
+  async _dispatchAntWithTarget(ant, targetUrl) {
+    // Find the target node
+    const target = this.topology.nodes.find(n => n.url === targetUrl);
+    if (!target) {
+      console.warn(`Target URL ${targetUrl} not found in topology`);
+      return;
+    }
 
     ant.state = 'fetching';
     ant.currentUrl = target.url;
