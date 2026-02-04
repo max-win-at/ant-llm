@@ -201,7 +201,7 @@ export class SettingsPanel {
     if (!providerId) return;
 
     const statusDiv = document.getElementById('credential-status');
-    statusDiv.innerHTML = '<div class="status-loading">Initializing provider...</div>';
+    statusDiv.innerHTML = '<div class="status-loading">Validating API key...</div>';
 
     try {
       // Collect credentials from form
@@ -212,26 +212,34 @@ export class SettingsPanel {
         if (field.type === 'checkbox') {
           credentials[field.name] = field.checked;
         } else {
-          credentials[field.name] = field.value;
+          credentials[field.name] = field.value.trim();
         }
       });
+
+      // Validate credentials are not empty
+      const provider = this.llmManager.getProvider(providerId);
+      if (!provider.validateCredentials(credentials)) {
+        statusDiv.innerHTML = '<div class="status-error">✗ Invalid API key format. Please check your input.</div>';
+        return;
+      }
 
       // Initialize provider
       const success = await this.llmManager.initializeProvider(providerId, credentials, true);
 
       if (success) {
-        statusDiv.innerHTML = '<div class="status-success">✓ Provider configured successfully!</div>';
+        statusDiv.innerHTML = '<div class="status-success">✓ API key saved! LLM mode is now active.<br><small>The key will be validated on first use.</small></div>';
         this.updateProviderStatus();
 
         // Enable LLM mode
         document.querySelector('input[name="mode"][value="llm"]').checked = true;
+        document.querySelector('.llm-config').style.display = 'block';
 
         // Trigger mode change event
-        if (this.onModeChange) {
-          this.onModeChange('llm', providerId);
+        if (this.onModeChangeCallback) {
+          this.onModeChangeCallback('llm', providerId);
         }
       } else {
-        statusDiv.innerHTML = '<div class="status-error">✗ Failed to initialize provider. Check your credentials.</div>';
+        statusDiv.innerHTML = '<div class="status-error">✗ Failed to initialize provider. Please check your API key format.</div>';
       }
     } catch (error) {
       statusDiv.innerHTML = `<div class="status-error">✗ Error: ${error.message}</div>`;
@@ -264,12 +272,22 @@ export class SettingsPanel {
   open() {
     this.isOpen = true;
     this.overlay.classList.add('active');
-    this.updateProviderStatus();
 
-    // Check current mode
-    if (this.llmManager.hasActiveProvider()) {
-      document.querySelector('input[name="mode"][value="llm"]').checked = true;
-      document.querySelector('.llm-config').style.display = 'block';
+    // Check current mode and update UI
+    const hasActiveProvider = this.llmManager.hasActiveProvider();
+    const llmRadio = document.querySelector('input[name="mode"][value="llm"]');
+    const traditionalRadio = document.querySelector('input[name="mode"][value="traditional"]');
+    const llmConfig = document.querySelector('.llm-config');
+
+    if (hasActiveProvider) {
+      llmRadio.checked = true;
+      traditionalRadio.checked = false;
+      llmConfig.style.display = 'block';
+      this.updateProviderStatus();
+    } else {
+      traditionalRadio.checked = true;
+      llmRadio.checked = false;
+      llmConfig.style.display = 'none';
     }
   }
 
