@@ -1,28 +1,39 @@
 import { CONFIG } from './config.js';
 import { Ant } from './ant.js';
-import { PheromoneMap } from './pheromone.js';
+import { PheromoneRegistry } from './pheromone.js';
 import { CookieManager } from './cookie-manager.js';
-import { Environment } from './environment.js';
+import { NetworkTopology } from './environment.js';
 
 /**
- * Colony orchestrates the full simulation lifecycle:
- *  - Manages the ant population (stored in LocalStorage)
- *  - Runs the simulation loop (tick)
- *  - Coordinates foraging, pheromone updates, reproduction and death
+ * Colony orchestrator for the stigmergic network topology simulation.
+ *
+ * Ants are asynchronous state machines that traverse URL-space via fetch().
+ * There is no spatial grid or canvas — the network IS the habitat.
+ *
+ * Tick sequence:
+ *   1. Advance all ants (energy decay, cooldowns)
+ *   2. Dispatch idle ants to forage (select URL, initiate fetch)
+ *   3. Deliver food from returning ants to the nest (cookies)
+ *   4. Prune decayed pheromones
+ *   5. Attempt reproduction if food threshold met
+ *   6. Remove dead ants
+ *   7. Persist state periodically
  */
 export class Colony {
   constructor() {
     this.ants = [];
-    this.pheromones = new PheromoneMap();
+    this.pheromones = new PheromoneRegistry();
     this.cookies = new CookieManager();
-    this.environment = new Environment();
+    this.topology = new NetworkTopology();
     this.tickCount = 0;
+    this.activeFetches = 0;
     this.stats = {
       totalFood: 0,
       totalDeaths: 0,
       totalBirths: 0,
     };
-    this._forageQueue = [];
+    /** @type {Array<{url: string, rtt: number, success: boolean, timestamp: number, antId: string, status: number}>} */
+    this.activityLog = [];
   }
 
   /**
@@ -33,7 +44,6 @@ export class Colony {
     await this.pheromones.load();
     this._loadAnts();
 
-    // Bootstrap colony if empty
     if (this.ants.length === 0) {
       for (let i = 0; i < CONFIG.INITIAL_COLONY_SIZE; i++) {
         this._spawnAnt();
@@ -48,8 +58,7 @@ export class Colony {
     try {
       const raw = localStorage.getItem(CONFIG.LS_KEY_ANTS);
       if (raw) {
-        const parsed = JSON.parse(raw);
-        this.ants = parsed.map((s) => new Ant(s));
+        this.ants = JSON.parse(raw).map((s) => new Ant(s));
       }
       const statsRaw = localStorage.getItem(CONFIG.LS_KEY_STATS);
       if (statsRaw) {
@@ -68,7 +77,7 @@ export class Colony {
       );
       localStorage.setItem(CONFIG.LS_KEY_STATS, JSON.stringify(this.stats));
     } catch {
-      // Storage full — the colony has outgrown its nest
+      // Storage full — the colony has outgrown its habitat
     }
   }
 
@@ -90,14 +99,48 @@ export class Colony {
     this.stats.totalDeaths += before - this.ants.length;
   }
 
-  // ─── Reproduction ────────────────────────────────────────────
-
   _tryReproduce() {
     if (this.cookies.count() >= CONFIG.REPRODUCTION_FOOD_THRESHOLD) {
-      // Consume food to create a new ant
       this.cookies.consume();
       this._spawnAnt();
     }
+  }
+
+  // ─── URL Selection (Stigmergic Decision Making) ──────────────
+
+  /**
+   * Select a target URL for an ant based on pheromone-weighted probability.
+   *
+   * Scouts prefer unexplored or low-pheromone URLs (novelty-seeking).
+   * Workers prefer high-pheromone URLs (exploitation of proven trails).
+   * Both avoid repellent-marked URLs (danger warnings from the colony).
+   */
+  _selectTarget(ant) {
+    const foodNodes = this.topology.getFoodNodes();
+    if (foodNodes.length === 0) return null;
+
+    const weights = foodNodes.map((node) => {
+      const intensity = this.pheromones.getEffectiveIntensity(node.url);
+
+      if (ant.role === 'scout') {
+        // Scouts are attracted to novelty — low/unknown pheromone
+        const novelty = Math.max(0.1, 1 - Math.abs(intensity));
+        return intensity < -0.5 ? 0.01 : novelty;
+      } else {
+        // Workers follow strong pheromone trails (collective preference)
+        const attractiveness = Math.max(0.1, intensity + 1);
+        return intensity < -0.5 ? 0.05 : attractiveness;
+      }
+    });
+
+    // Weighted random selection (roulette wheel)
+    const totalWeight = weights.reduce((s, w) => s + w, 0);
+    let r = Math.random() * totalWeight;
+    for (let i = 0; i < foodNodes.length; i++) {
+      r -= weights[i];
+      if (r <= 0) return foodNodes[i];
+    }
+    return foodNodes[foodNodes.length - 1];
   }
 
   // ─── Core Simulation Tick ────────────────────────────────────
@@ -105,29 +148,27 @@ export class Colony {
   async tick() {
     this.tickCount++;
 
+    // 1. Advance all ants (energy decay, cooldowns)
     for (const ant of this.ants) {
-      // 1. Advance physics / energy
       ant.tick();
+    }
 
-      if (ant.state === 'dead') continue;
+    // 2. Dispatch idle ants to forage (network movement via fetch)
+    const idleAnts = this.ants.filter((a) => a.canForage());
+    const slotsAvailable = CONFIG.MAX_CONCURRENT_FETCHES - this.activeFetches;
+    const toDispatch = idleAnts.slice(0, Math.max(0, slotsAvailable));
 
-      // 2. Deposit pheromone trail
-      this.pheromones.deposit(ant.x, ant.y, CONFIG.PHEROMONE_DEPOSIT_AMOUNT * 0.2);
+    const fetchPromises = toDispatch.map((ant) => this._dispatchAnt(ant));
 
-      // 3. Behaviour based on state
-      if (ant.state === 'returning' && ant.isAtNest()) {
+    // 3. Process returning ants — deliver food at nest
+    for (const ant of this.ants) {
+      if (ant.state === 'returning' && ant.carrying) {
         this._deliverFood(ant);
-      } else if (ant.state === 'returning') {
-        // Head home
-        ant.steerTowards(CONFIG.NEST_X, CONFIG.NEST_Y);
-      } else if (ant.state === 'exploring') {
-        this._explore(ant);
       }
     }
 
-    // 4. Evaporate pheromones
-    this.pheromones.evaporate();
-    this.pheromones.evaporateUrls();
+    // 4. Prune decayed pheromones (evaporation)
+    this.pheromones.prune();
 
     // 5. Reproduction check
     this._tryReproduce();
@@ -136,89 +177,122 @@ export class Colony {
     this._removeDeadAnts();
 
     // 7. Persist periodically
-    if (this.tickCount % 20 === 0) {
+    if (this.tickCount % 10 === 0) {
       this._saveAnts();
     }
-    if (this.tickCount % 100 === 0) {
+    if (this.tickCount % 30 === 0) {
       this.pheromones.flush();
     }
 
-    // 8. Process one pending forage
-    await this._processForageQueue();
-  }
-
-  // ─── Ant Behaviours ──────────────────────────────────────────
-
-  _explore(ant) {
-    // Follow pheromones if detected
-    const pDir = this.pheromones.sniff(ant.x, ant.y);
-    if (pDir !== null && Math.random() < 0.6) {
-      const px = ant.x + Math.cos(pDir) * CONFIG.ANT_SIGHT_RADIUS;
-      const py = ant.y + Math.sin(pDir) * CONFIG.ANT_SIGHT_RADIUS;
-      ant.steerTowards(px, py);
+    // 8. Trim activity log
+    if (this.activityLog.length > 200) {
+      this.activityLog = this.activityLog.slice(-100);
     }
 
-    // Check if ant reached a source
-    const source = this.environment.sourceAt(ant.x, ant.y);
-    if (source && ant.canForage()) {
-      if (source.kind === 'food') {
-        this._enqueueForage(ant, source);
-      } else if (source.kind === 'danger') {
-        this._handleDanger(ant, source);
-      }
-    }
+    // Wait for in-flight fetches to complete
+    await Promise.allSettled(fetchPromises);
   }
 
-  _enqueueForage(ant, source) {
-    ant.state = 'foraging';
+  // ─── Ant Dispatch (Network Movement) ─────────────────────────
+
+  /**
+   * Send an ant on a forage mission.
+   * The fetch() call is the ant's physical movement through the network.
+   */
+  async _dispatchAnt(ant) {
+    const target = this._selectTarget(ant);
+    if (!target) return;
+
+    ant.state = 'fetching';
+    ant.currentUrl = target.url;
     ant.forageCooldown = CONFIG.FORAGE_COOLDOWN_TICKS;
-    this._forageQueue.push({ ant, source });
-  }
+    this.activeFetches++;
 
-  async _processForageQueue() {
-    if (this._forageQueue.length === 0) return;
-    const { ant, source } = this._forageQueue.shift();
+    try {
+      const result = await this.topology.forage(target);
 
-    const result = await this.environment.forage(source);
-
-    if (result.success) {
-      ant.carrying = { title: result.title, nutrition: result.nutrition };
-      ant.state = 'returning';
-      ant.visitedUrls.push(source.url);
-      // Strong pheromone at food site
-      this.pheromones.deposit(ant.x, ant.y, CONFIG.PHEROMONE_DEPOSIT_AMOUNT * 3);
-      await this.pheromones.depositUrl(source.url, result.nutrition);
-    } else {
-      // The request failed — treat as danger
-      this._handleDanger(ant, {
-        damage: result.status === 429 ? 50 : 20,
-        type: result.danger,
+      this.activityLog.push({
+        url: target.url,
+        rtt: result.rtt,
+        success: result.success,
+        timestamp: Date.now(),
+        antId: ant.id,
+        status: result.status,
       });
-      ant.state = 'exploring';
+
+      if (result.success) {
+        // Successful forage — deposit pheromone, carry food home
+        ant.carrying = {
+          title: result.title,
+          nutrition: result.nutrition,
+          foodType: result.foodType,
+          payload: result.payload,
+        };
+        ant.state = 'returning';
+        ant.applyLatencyPenalty(result.rtt);
+        ant.visitedUrls.push(target.url);
+        this.pheromones.deposit(target.url, result.rtt);
+      } else {
+        // Failed forage — encounter ecological danger
+        this._handleDanger(ant, target, result);
+      }
+    } catch {
+      ant.state = 'idle';
+    } finally {
+      this.activeFetches--;
     }
   }
 
+  /**
+   * Deliver food at the nest.
+   * Sugar → stored as cookies (quick energy).
+   * Protein → enables brood generation (new ant instances via reproduction).
+   */
   _deliverFood(ant) {
     if (ant.carrying) {
       const label = Date.now().toString(36);
       this.cookies.store(label, ant.carrying.title);
-      ant.energy = Math.min(ant.energy + CONFIG.ANT_ENERGY_GAIN_ON_FOOD, CONFIG.ANT_MAX_ENERGY);
+      ant.energy = Math.min(
+        ant.energy + CONFIG.ANT_ENERGY_GAIN_ON_FOOD,
+        CONFIG.ANT_MAX_ENERGY
+      );
       this.stats.totalFood++;
-      // Strong pheromone at nest
-      this.pheromones.deposit(ant.x, ant.y, CONFIG.PHEROMONE_DEPOSIT_AMOUNT * 2);
     }
     ant.carrying = null;
-    ant.state = 'exploring';
+    ant.currentUrl = null;
+    ant.state = 'idle';
   }
 
-  _handleDanger(ant, source) {
-    ant.energy -= source.damage || 30;
+  /**
+   * Handle ecological dangers in REST-space.
+   *
+   * Predator (429): Ant-Lion — immediate energy drain, possible termination
+   * Storm (5xx):    Habitat collapse — repellent pheromone warns colony
+   * Timeout:        Swamp — energy drain from prolonged RTT
+   * Camouflage:     Redirect loops — wasted energy, no yield
+   */
+  _handleDanger(ant, source, result) {
+    switch (result.danger) {
+      case 'predator':
+        ant.energy -= source.damage || 50;
+        break;
+      case 'storm':
+        ant.energy -= source.damage || 30;
+        this.pheromones.depositRepellent(source.url);
+        break;
+      case 'timeout':
+        ant.applyLatencyPenalty(result.rtt);
+        break;
+      case 'camouflage':
+        ant.energy -= 15;
+        break;
+    }
+
     if (ant.energy <= 0) {
       ant.state = 'dead';
     } else {
-      // Flee: reverse heading
-      ant.heading += Math.PI + (Math.random() - 0.5) * 0.5;
-      ant.state = 'exploring';
+      ant.currentUrl = null;
+      ant.state = 'idle';
     }
   }
 
@@ -232,12 +306,17 @@ export class Colony {
     return this.cookies.count();
   }
 
+  get fetchingCount() {
+    return this.ants.filter((a) => a.state === 'fetching').length;
+  }
+
   /**
-   * Reset the entire colony (for debugging / fresh start).
+   * Reset the entire colony for a fresh start.
    */
   reset() {
     this.ants = [];
     this.cookies.clear();
+    this.activityLog = [];
     localStorage.removeItem(CONFIG.LS_KEY_ANTS);
     localStorage.removeItem(CONFIG.LS_KEY_STATS);
     this.stats = { totalFood: 0, totalDeaths: 0, totalBirths: 0 };

@@ -3,19 +3,20 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Ant Colony Simulation</title>
+  <title>Stigmergic Network Topology</title>
   <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
   <header>
-    <h1>Ant Colony Simulation</h1>
+    <h1>Stigmergic Network Topology</h1>
     <p class="subtitle">
-      Stigmergic Web-Agent Architecture &mdash; Bio-inspired browser simulation
+      Bio-inspired web agents mapping the topography of the internet
+      through trial, error, and collective memory
     </p>
   </header>
 
   <main>
-    <div class="canvas-wrapper">
+    <div class="graph-wrapper">
       <canvas id="simulation"></canvas>
     </div>
 
@@ -28,20 +29,23 @@
     <section class="info">
       <h2>How it works</h2>
       <ul>
-        <li><strong>Ants</strong> are persistent agents stored in <code>LocalStorage</code>.</li>
-        <li><strong>Pheromone trails</strong> are maintained in <code>IndexedDB</code>.</li>
-        <li><strong>Food</strong> is fetched from public APIs and stored as browser <code>Cookies</code> (with natural expiry).</li>
-        <li><strong>Dangers</strong> come from HTTP error codes (429, 500) simulated via <code>httpstat.us</code>.</li>
-        <li>The colony <strong>reproduces</strong> when enough food is gathered, and ants <strong>die</strong> from energy loss or predators.</li>
+        <li><strong>Habitat</strong> is the network address space &mdash; a graph of URLs (nodes) and latencies (edges).</li>
+        <li><strong>Movement</strong> is the act of <code>fetch()</code> &mdash; each request is physical locomotion through the network.</li>
+        <li><strong>Distance</strong> is measured in RTT (round-trip time) &mdash; slow APIs are swamps, fast APIs are highways.</li>
+        <li><strong>Pheromones</strong> are temporal data points on URL nodes, decaying via <code>e<sup>-&lambda;&middot;&Delta;t</sup></code>.</li>
+        <li><strong>Food</strong> is the JSON payload &mdash; flat structures are <em>sugar</em> (quick energy), nested objects are <em>protein</em> (brood generation).</li>
+        <li><strong>Predators</strong> are HTTP error codes: <code>429</code> (Ant-Lion), <code>5xx</code> (Storm), timeouts (Swamp).</li>
+        <li><strong>Ants</strong> are persistent async state machines stored in <code>LocalStorage</code>.</li>
+        <li><strong>Nest</strong> stores food as browser <code>Cookies</code> with natural expiry.</li>
       </ul>
       <h2>Legend</h2>
       <ul class="legend">
-        <li><span class="dot dot-worker"></span> Worker ant</li>
-        <li><span class="dot dot-scout"></span> Scout ant</li>
+        <li><span class="dot dot-worker"></span> Worker (exploiting known trails)</li>
+        <li><span class="dot dot-scout"></span> Scout (exploring novel URLs)</li>
         <li><span class="dot dot-returning"></span> Returning with food</li>
-        <li><span class="dot dot-food"></span> Food source (API)</li>
-        <li><span class="dot dot-danger"></span> Danger zone</li>
-        <li><span class="dot dot-nest"></span> Nest</li>
+        <li><span class="dot dot-food"></span> Food node (API endpoint)</li>
+        <li><span class="dot dot-danger"></span> Danger node (error endpoint)</li>
+        <li><span class="dot dot-nest"></span> Nest (colony center)</li>
       </ul>
     </section>
   </main>
