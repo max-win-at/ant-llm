@@ -28,11 +28,6 @@ export const CONFIG = {
   COOKIE_MAX_AGE_SECONDS: 3600,
   COOKIE_PREFIX: 'antfood_',
 
-  // --- CORS Proxy ---
-  // Many public APIs block cross-origin requests from arbitrary domains.
-  // Route fetches through a CORS proxy so ants can actually reach their food.
-  CORS_PROXY_PREFIX: 'https://corsproxy.io/?',
-
   // --- Network Habitat (URL Nodes) ---
   // Food types follow biological classification:
   //   sugar  = flat JSON structures → quick energy (cookie storage)

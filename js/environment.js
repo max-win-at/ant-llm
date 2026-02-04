@@ -99,63 +99,37 @@ export class NetworkTopology {
    */
   async forage(source) {
     const randomId = Math.floor(Math.random() * 20) + 1;
-    const rawUrl = source.url.endsWith('/')
+    const url = source.url.endsWith('/')
       ? source.url + randomId
       : source.url;
 
-    // Route through CORS proxy to avoid cross-origin blocks
-    const url = CONFIG.CORS_PROXY_PREFIX
-      ? CONFIG.CORS_PROXY_PREFIX + encodeURIComponent(rawUrl)
-      : rawUrl;
+    // Food sources: fetch with mode:'no-cors' for real RTT measurement,
+    // then synthesise the response body locally. The APIs block cross-origin
+    // reads, but the opaque round-trip still gives us genuine network distance.
+    if (source.kind === 'food') {
+      return this._forageFood(source, url, randomId);
+    }
 
+    // Danger sources (httpstat.us supports CORS): normal fetch.
+    return this._forageDanger(source, url);
+  }
+
+  /**
+   * Food foraging — opaque fetch for RTT + synthetic payload.
+   */
+  async _forageFood(source, url, id) {
     const startTime = performance.now();
-
     try {
-      const response = await fetch(url, {
+      await fetch(url, {
+        mode: 'no-cors',
         signal: AbortSignal.timeout(CONFIG.ANT_FETCH_TIMEOUT_MS),
       });
       const rtt = performance.now() - startTime;
 
-      // HTTP 429: Apex-Predator (Ant-Lion)
-      if (response.status === 429) {
-        return {
-          success: false,
-          status: 429,
-          rtt,
-          danger: 'predator',
-          url: rawUrl,
-        };
-      }
-
-      // HTTP 5xx: Storm (habitat collapse)
-      if (response.status >= 500) {
-        return {
-          success: false,
-          status: response.status,
-          rtt,
-          danger: 'storm',
-          url: rawUrl,
-        };
-      }
-
-      // Non-OK status: Camouflage (redirect loops, client errors)
-      if (!response.ok) {
-        return {
-          success: false,
-          status: response.status,
-          rtt,
-          danger: 'camouflage',
-          url: rawUrl,
-        };
-      }
-
-      // 200 OK: Successful food acquisition
-      const data = await response.json();
+      const data = this._syntheticFood(source, id);
       const nutrition = this.evaluateNutrition(data, source);
-      const title =
-        data.title || data.name || data.id || JSON.stringify(data).slice(0, 60);
+      const title = data.title || data.name || `food-${id}`;
       const payload = JSON.stringify(data).slice(0, 500);
-      const foodType = source.type; // 'sugar' or 'protein'
 
       return {
         success: true,
@@ -164,11 +138,10 @@ export class NetworkTopology {
         nutrition,
         title: String(title).slice(0, 80),
         payload,
-        foodType,
-        url: rawUrl,
+        foodType: source.type,
+        url,
       };
     } catch (err) {
-      // Timeout / network error: Swamp terrain
       const rtt = performance.now() - startTime;
       return {
         success: false,
@@ -176,8 +149,94 @@ export class NetworkTopology {
         rtt,
         danger: 'timeout',
         message: err.message,
-        url: rawUrl,
+        url,
       };
     }
+  }
+
+  /**
+   * Danger foraging — full CORS fetch to read status codes.
+   */
+  async _forageDanger(source, url) {
+    const startTime = performance.now();
+    try {
+      const response = await fetch(url, {
+        signal: AbortSignal.timeout(CONFIG.ANT_FETCH_TIMEOUT_MS),
+      });
+      const rtt = performance.now() - startTime;
+
+      if (response.status === 429) {
+        return { success: false, status: 429, rtt, danger: 'predator', url };
+      }
+      if (response.status >= 500) {
+        return {
+          success: false,
+          status: response.status,
+          rtt,
+          danger: 'storm',
+          url,
+        };
+      }
+      if (!response.ok) {
+        return {
+          success: false,
+          status: response.status,
+          rtt,
+          danger: 'camouflage',
+          url,
+        };
+      }
+
+      // A danger source that somehow returns 200 — treat as swamp (wasted trip).
+      return { success: false, status: 200, rtt, danger: 'swamp', url };
+    } catch (err) {
+      const rtt = performance.now() - startTime;
+      return {
+        success: false,
+        status: 0,
+        rtt,
+        danger: 'timeout',
+        message: err.message,
+        url,
+      };
+    }
+  }
+
+  /**
+   * Generate a synthetic food payload matching the expected JSON shape.
+   *
+   * Sugar (flat JSON)   — mirrors JSONPlaceholder posts / todos.
+   * Protein (nested)    — mirrors PokeAPI / REST Countries depth.
+   */
+  _syntheticFood(source, id) {
+    if (source.type === 'sugar') {
+      return {
+        userId: Math.ceil(id / 2),
+        id,
+        title: `${source.name} item ${id}`,
+        body: `Foraging payload collected from ${source.url}`,
+        completed: id % 2 === 0,
+      };
+    }
+
+    // Protein: nested structure for higher nutrition scoring
+    return {
+      id,
+      name: `specimen-${id}`,
+      height: id * 3 + 10,
+      weight: id * 10 + 50,
+      types: [
+        { type: { name: 'alpha' } },
+        { type: { name: 'beta' } },
+      ],
+      stats: [
+        { stat: { name: 'hp' }, base_stat: 40 + id * 3 },
+        { stat: { name: 'attack' }, base_stat: 30 + id * 2 },
+        { stat: { name: 'defense' }, base_stat: 35 + id },
+      ],
+      abilities: [
+        { ability: { name: `trait-${id}` }, is_hidden: false },
+      ],
+    };
   }
 }
