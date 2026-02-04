@@ -40,6 +40,7 @@ export class Colony {
    * Initialise: open IndexedDB, load pheromones, restore ants from LocalStorage.
    */
   async init() {
+    await this.topology.probeNetwork();
     await this.pheromones.init();
     await this.pheromones.load();
     this._loadAnts();

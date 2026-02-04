@@ -17,6 +17,8 @@ import { CONFIG } from './config.js';
 export class NetworkTopology {
   constructor() {
     this.nodes = [];
+    this._restricted = false;
+    this._fallbackCache = new Map();
     this._init();
   }
 
@@ -32,6 +34,40 @@ export class NetworkTopology {
     }));
 
     this.nodes = [...foods, ...dangers];
+  }
+
+  /**
+   * Probe whether external APIs are reachable with CORS.
+   *
+   * Restricted networks (corporate proxies, content filters) inject 403
+   * responses without CORS headers, making every cross-origin fetch fail.
+   * When detected, food sources fall back to same-origin static JSON.
+   */
+  async probeNetwork() {
+    const testUrl = CONFIG.FOOD_SOURCES[0]?.url;
+    if (!testUrl) return;
+
+    try {
+      const url = testUrl.endsWith('/') ? testUrl + '1' : testUrl;
+      const resp = await fetch(url, {
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!resp.ok) {
+        this._restricted = true;
+        return;
+      }
+      await resp.json();
+      this._restricted = false;
+    } catch {
+      this._restricted = true;
+    }
+
+    if (this._restricted) {
+      console.warn(
+        '[ant-llm] External APIs unreachable (restricted network detected). ' +
+          'Falling back to same-origin food sources.'
+      );
+    }
   }
 
   /**
@@ -99,36 +135,51 @@ export class NetworkTopology {
    */
   async forage(source) {
     const randomId = Math.floor(Math.random() * 20) + 1;
-    const url = source.url.endsWith('/')
-      ? source.url + randomId
-      : source.url;
 
-    // Food sources: fetch with mode:'no-cors' for real RTT measurement,
-    // then synthesise the response body locally. The APIs block cross-origin
-    // reads, but the opaque round-trip still gives us genuine network distance.
     if (source.kind === 'food') {
-      return this._forageFood(source, url, randomId);
+      if (this._restricted && source.fallbackUrl) {
+        return this._forageLocal(source, randomId);
+      }
+      return this._forageRemote(source, randomId);
     }
 
     // Danger sources (httpstat.us supports CORS): normal fetch.
+    const url = source.url.endsWith('/')
+      ? source.url + randomId
+      : source.url;
     return this._forageDanger(source, url);
   }
 
   /**
-   * Food foraging — opaque fetch for RTT + synthetic payload.
+   * Remote food foraging — direct fetch to external API.
+   * Used on unrestricted networks where CORS succeeds.
    */
-  async _forageFood(source, url, id) {
+  async _forageRemote(source, id) {
+    const url = source.url.endsWith('/')
+      ? source.url + id
+      : source.url;
     const startTime = performance.now();
+
     try {
-      await fetch(url, {
-        mode: 'no-cors',
+      const response = await fetch(url, {
         signal: AbortSignal.timeout(CONFIG.ANT_FETCH_TIMEOUT_MS),
       });
       const rtt = performance.now() - startTime;
 
-      const data = this._syntheticFood(source, id);
+      if (!response.ok) {
+        return {
+          success: false,
+          status: response.status,
+          rtt,
+          danger: 'camouflage',
+          url,
+        };
+      }
+
+      const data = await response.json();
       const nutrition = this.evaluateNutrition(data, source);
-      const title = data.title || data.name || `food-${id}`;
+      const title =
+        data.title || data.name || data.id || JSON.stringify(data).slice(0, 60);
       const payload = JSON.stringify(data).slice(0, 500);
 
       return {
@@ -150,6 +201,73 @@ export class NetworkTopology {
         danger: 'timeout',
         message: err.message,
         url,
+      };
+    }
+  }
+
+  /**
+   * Local food foraging — fetch same-origin static JSON fallback.
+   * Used on restricted networks where cross-origin requests are blocked.
+   * The fallback files contain real API data snapshots (arrays of items).
+   */
+  async _forageLocal(source, id) {
+    const canonicalUrl = source.url.endsWith('/')
+      ? source.url + id
+      : source.url;
+    const startTime = performance.now();
+
+    try {
+      let items = this._fallbackCache.get(source.fallbackUrl);
+      if (!items) {
+        const response = await fetch(source.fallbackUrl, {
+          signal: AbortSignal.timeout(CONFIG.ANT_FETCH_TIMEOUT_MS),
+        });
+        if (!response.ok) {
+          const rtt = performance.now() - startTime;
+          return {
+            success: false,
+            status: response.status,
+            rtt,
+            danger: 'camouflage',
+            url: canonicalUrl,
+          };
+        }
+        items = await response.json();
+        this._fallbackCache.set(source.fallbackUrl, items);
+      }
+      const rtt = performance.now() - startTime;
+
+      const data = Array.isArray(items)
+        ? items[(id - 1) % items.length]
+        : items;
+      const nutrition = this.evaluateNutrition(data, source);
+      const title =
+        data.title ||
+        data.name?.common ||
+        data.name ||
+        data.id ||
+        JSON.stringify(data).slice(0, 60);
+      const payload = JSON.stringify(data).slice(0, 500);
+
+      return {
+        success: true,
+        status: 200,
+        rtt,
+        nutrition,
+        title: String(title).slice(0, 80),
+        payload,
+        foodType: source.type,
+        url: canonicalUrl,
+      };
+    } catch (err) {
+      const rtt = performance.now() - startTime;
+      return {
+        success: false,
+        status: 0,
+        rtt,
+        danger: 'timeout',
+        message: err.message,
+        url: canonicalUrl,
       };
     }
   }
@@ -200,43 +318,5 @@ export class NetworkTopology {
         url,
       };
     }
-  }
-
-  /**
-   * Generate a synthetic food payload matching the expected JSON shape.
-   *
-   * Sugar (flat JSON)   — mirrors JSONPlaceholder posts / todos.
-   * Protein (nested)    — mirrors PokeAPI / REST Countries depth.
-   */
-  _syntheticFood(source, id) {
-    if (source.type === 'sugar') {
-      return {
-        userId: Math.ceil(id / 2),
-        id,
-        title: `${source.name} item ${id}`,
-        body: `Foraging payload collected from ${source.url}`,
-        completed: id % 2 === 0,
-      };
-    }
-
-    // Protein: nested structure for higher nutrition scoring
-    return {
-      id,
-      name: `specimen-${id}`,
-      height: id * 3 + 10,
-      weight: id * 10 + 50,
-      types: [
-        { type: { name: 'alpha' } },
-        { type: { name: 'beta' } },
-      ],
-      stats: [
-        { stat: { name: 'hp' }, base_stat: 40 + id * 3 },
-        { stat: { name: 'attack' }, base_stat: 30 + id * 2 },
-        { stat: { name: 'defense' }, base_stat: 35 + id },
-      ],
-      abilities: [
-        { ability: { name: `trait-${id}` }, is_hidden: false },
-      ],
-    };
   }
 }
