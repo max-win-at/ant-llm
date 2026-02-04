@@ -61,7 +61,7 @@ export class SettingsPanel {
               <div id="credential-fields"></div>
               <div class="form-actions">
                 <button id="save-credentials" class="btn-primary">Save & Activate</button>
-                <button id="test-credentials" class="btn-secondary">Test Connection</button>
+                <button id="test-credentials" class="btn-secondary">Validate Format</button>
               </div>
               <div id="credential-status"></div>
             </div>
@@ -101,8 +101,18 @@ export class SettingsPanel {
         if (e.target.value === 'llm') {
           llmConfig.style.display = 'block';
           this.updateProviderStatus();
+
+          // Notify if mode changed
+          if (this.onModeChangeCallback) {
+            this.onModeChangeCallback('llm', null);
+          }
         } else {
           llmConfig.style.display = 'none';
+
+          // Disable LLM mode
+          if (this.onModeChangeCallback) {
+            this.onModeChangeCallback('traditional', null);
+          }
         }
       });
     });
@@ -247,31 +257,47 @@ export class SettingsPanel {
   }
 
   async testCredentials() {
+    const providerId = document.getElementById('provider-select').value;
+    if (!providerId) return;
+
     const statusDiv = document.getElementById('credential-status');
-    statusDiv.innerHTML = '<div class="status-loading">Testing connection...</div>';
+    statusDiv.innerHTML = '<div class="status-loading">Validating API key format...</div>';
 
     try {
-      // Try to make a simple completion
-      const response = await this.llmManager.complete({
-        systemPrompt: 'You are a helpful assistant.',
-        userPrompt: 'Say "test successful" if you can read this.',
-        maxTokens: 20,
-        temperature: 0
+      // Collect credentials from form
+      const credentials = {};
+      const fields = document.querySelectorAll('#credential-fields input');
+
+      fields.forEach(field => {
+        if (field.type === 'checkbox') {
+          credentials[field.name] = field.checked;
+        } else {
+          credentials[field.name] = field.value.trim();
+        }
       });
 
-      if (response) {
-        statusDiv.innerHTML = '<div class="status-success">✓ Connection test successful!</div>';
-      } else {
-        statusDiv.innerHTML = '<div class="status-error">✗ Test failed: empty response</div>';
+      // Validate credentials format
+      const provider = this.llmManager.getProvider(providerId);
+      if (!provider.validateCredentials(credentials)) {
+        statusDiv.innerHTML = '<div class="status-error">✗ Invalid API key format. Please check your input.</div>';
+        return;
       }
+
+      statusDiv.innerHTML = '<div class="status-success">✓ API key format is valid!<br><small>Click "Save & Activate" to use this key.</small></div>';
     } catch (error) {
-      statusDiv.innerHTML = `<div class="status-error">✗ Test failed: ${error.message}</div>`;
+      statusDiv.innerHTML = `<div class="status-error">✗ Error: ${error.message}</div>`;
     }
   }
 
   open() {
     this.isOpen = true;
     this.overlay.classList.add('active');
+
+    // Scroll to top of settings content
+    const settingsContent = document.querySelector('.settings-content');
+    if (settingsContent) {
+      settingsContent.scrollTop = 0;
+    }
 
     // Check current mode and update UI
     const hasActiveProvider = this.llmManager.hasActiveProvider();
