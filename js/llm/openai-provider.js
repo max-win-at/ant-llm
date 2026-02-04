@@ -34,13 +34,15 @@ export class OpenAIProvider extends LLMProvider {
   async initialize(credentials) {
     this.apiKey = credentials.apiKey;
 
-    // Validate by making a test request
-    try {
-      await this._testConnection();
+    // For OpenAI, validate the key format
+    // Testing can fail due to network issues, CORS, etc.
+    // The key will be validated on first actual use
+    if (this.apiKey && (this.apiKey.startsWith('sk-') || this.apiKey.startsWith('sk-proj-'))) {
       this.isAuthenticated = true;
+      console.log('OpenAI API key accepted (format valid)');
       return true;
-    } catch (error) {
-      console.error('OpenAI API key validation failed:', error);
+    } else {
+      console.error('OpenAI API key format invalid (must start with sk- or sk-proj-)');
       this.isAuthenticated = false;
       return false;
     }

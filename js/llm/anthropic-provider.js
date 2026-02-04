@@ -56,13 +56,15 @@ export class AnthropicProvider extends LLMProvider {
       // API key authentication
       this.apiKey = credentials.apiKey;
 
-      // Validate by making a test request
-      try {
-        await this._testConnection();
+      // Validate the key format
+      // Testing can fail due to network issues, CORS, etc.
+      // The key will be validated on first actual use
+      if (this.apiKey && this.apiKey.startsWith('sk-ant-')) {
         this.isAuthenticated = true;
+        console.log('Anthropic API key accepted (format valid)');
         return true;
-      } catch (error) {
-        console.error('Anthropic API key validation failed:', error);
+      } else {
+        console.error('Anthropic API key format invalid (must start with sk-ant-)');
         this.isAuthenticated = false;
         return false;
       }
