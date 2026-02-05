@@ -3,6 +3,7 @@ import { Colony } from './colony.js';
 import { Renderer } from './renderer.js';
 import { LLMManager } from './llm/llm-manager.js';
 import { SettingsPanel } from './ui/settings-panel.js';
+import { LLMVisualizationPanel } from './ui/llm-visualization-panel.js';
 
 /**
  * Application entry point for the stigmergic network topology simulation.
@@ -21,10 +22,12 @@ async function main() {
   const renderer = new Renderer(canvas);
   const llmManager = new LLMManager();
   const settingsPanel = new SettingsPanel(llmManager);
+  const llmVizPanel = new LLMVisualizationPanel();
 
   // Expose to console for debugging
   window.__colony = colony;
   window.__llmManager = llmManager;
+  window.__llmVizPanel = llmVizPanel;
 
   const statusEl = document.getElementById('status');
   const setStatus = (msg) => {
@@ -38,6 +41,12 @@ async function main() {
   const restored = await llmManager.restoreLastProvider();
   if (restored) {
     colony.setLLMManager(llmManager);
+    // Set up visualization callback
+    if (colony.llmOrchestrator) {
+      colony.llmOrchestrator.setVisualizationCallback((data) => {
+        llmVizPanel.updateVisualization(data);
+      });
+    }
     console.log('LLM provider restored:', llmManager.getActiveProvider().getName());
     setStatus(`Colony ready — ${colony.aliveCount} ants (LLM Mode: ${llmManager.getActiveProvider().getName()})`);
   } else {
@@ -101,11 +110,28 @@ async function main() {
     });
   }
 
+  const llmVizBtn = document.getElementById('btn-llm-viz');
+  if (llmVizBtn) {
+    llmVizBtn.addEventListener('click', () => {
+      if (!colony.isLLMEnabled()) {
+        alert('Please enable LLM mode in settings first to see LLM visualization.');
+        return;
+      }
+      llmVizPanel.toggle();
+    });
+  }
+
   // Handle mode changes from settings panel
   settingsPanel.onModeChangeCallback = (mode, providerId) => {
     if (mode === 'llm') {
       if (llmManager.hasActiveProvider()) {
         colony.setLLMManager(llmManager);
+        // Set up visualization callback
+        if (colony.llmOrchestrator) {
+          colony.llmOrchestrator.setVisualizationCallback((data) => {
+            llmVizPanel.updateVisualization(data);
+          });
+        }
         const providerName = llmManager.getActiveProvider().getName();
         setStatus(`LLM Mode activated: ${providerName}`);
         console.log('LLM mode activated with provider:', providerName);
@@ -114,6 +140,7 @@ async function main() {
       }
     } else {
       colony.llmMode = false;
+      llmVizPanel.clear(); // Clear visualization when switching to traditional mode
       setStatus('Traditional mode activated');
       console.log('Traditional mode activated');
     }
