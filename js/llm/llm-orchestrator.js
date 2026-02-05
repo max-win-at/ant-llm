@@ -10,6 +10,15 @@ export class LLMOrchestrator {
     this.colony = colony;
     this.decisionHistory = [];
     this.maxHistoryLength = 5; // Keep last 5 decisions for context
+    this.visualizationCallback = null; // Callback for visualization updates
+  }
+
+  /**
+   * Set callback for visualization updates
+   * @param {Function} callback - Called with visualization data on each LLM call
+   */
+  setVisualizationCallback(callback) {
+    this.visualizationCallback = callback;
   }
 
   /**
@@ -293,11 +302,58 @@ IMPORTANT:
 
       console.log(`LLM provided ${decisions.size} decisions for ${idleAnts.length} ants`);
 
+      // Send visualization data if callback is set
+      if (this.visualizationCallback) {
+        this._emitVisualizationData(
+          systemPrompt,
+          userPrompt,
+          response,
+          decisions,
+          idleAnts,
+          snapshot
+        );
+      }
+
       return decisions;
 
     } catch (error) {
       console.error('LLM decision-making failed:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Emit visualization data to registered callback
+   * @private
+   */
+  _emitVisualizationData(systemPrompt, userPrompt, response, decisions, idleAnts, snapshot) {
+    try {
+      // Build enriched decision data
+      const enrichedDecisions = idleAnts.map(ant => {
+        const decision = decisions.get(ant.id);
+        return {
+          antId: ant.id,
+          role: ant.role,
+          energy: ant.energy,
+          ticksAlive: ant.ticksAlive || 0,
+          targetUrl: decision ? decision.targetUrl : null,
+          reasoning: decision ? decision.reasoning : 'No decision made'
+        };
+      });
+
+      const visualizationData = {
+        systemPrompt,
+        userPrompt,
+        response,
+        decisions: enrichedDecisions,
+        colonyState: snapshot.colonyStats,
+        foodSources: snapshot.foodSources,
+        timestamp: Date.now()
+      };
+
+      this.visualizationCallback(visualizationData);
+    } catch (error) {
+      console.error('Failed to emit visualization data:', error);
     }
   }
 }
