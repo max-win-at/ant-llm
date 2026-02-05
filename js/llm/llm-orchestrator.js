@@ -304,6 +304,7 @@ IMPORTANT:
 
       // Send visualization data if callback is set
       if (this.visualizationCallback) {
+        console.log('[LLM Orchestrator] Emitting visualization data to callback');
         this._emitVisualizationData(
           systemPrompt,
           userPrompt,
@@ -312,6 +313,8 @@ IMPORTANT:
           idleAnts,
           snapshot
         );
+      } else {
+        console.log('[LLM Orchestrator] No visualization callback set');
       }
 
       return decisions;
@@ -350,6 +353,12 @@ IMPORTANT:
         foodSources: snapshot.foodSources,
         timestamp: Date.now()
       };
+
+      console.log('[LLM Orchestrator] Calling visualization callback with data:', {
+        decisionsCount: enrichedDecisions.length,
+        hasPrompts: !!systemPrompt && !!userPrompt,
+        hasResponse: !!response
+      });
 
       this.visualizationCallback(visualizationData);
     } catch (error) {
