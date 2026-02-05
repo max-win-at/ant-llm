@@ -182,12 +182,22 @@ export class LLMVisualizationPanel {
    * @param {Object} data.colonyState - Current colony state
    */
   updateVisualization(data) {
+    console.log('[LLM Viz] Received visualization data:', {
+      decisionsCount: data?.decisions?.length || 0,
+      hasSystemPrompt: !!data?.systemPrompt,
+      hasUserPrompt: !!data?.userPrompt,
+      hasResponse: !!data?.response,
+      colonyState: data?.colonyState
+    });
+
     const { decisions, systemPrompt, userPrompt, response, colonyState } = data;
 
     // Store current data
     this.currentPrompt = { system: systemPrompt, user: userPrompt };
     this.currentResponse = response;
     this.antDecisions = decisions || [];
+
+    console.log('[LLM Viz] Processed decisions:', this.antDecisions);
 
     // Add to history
     this.addToHistory({
@@ -200,6 +210,8 @@ export class LLMVisualizationPanel {
     this.updateAntDecisionsTab();
     this.updateSwarmIntelligenceTab();
     this.updatePromptsTab();
+
+    console.log('[LLM Viz] Tabs updated successfully');
   }
 
   addToHistory(item) {
